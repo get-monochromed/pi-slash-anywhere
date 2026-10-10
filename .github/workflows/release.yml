@@ -32,6 +32,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install fd
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fd-find
+          sudo ln -s /usr/bin/fdfind /usr/local/bin/fd
+          fd --version
+
       - name: Run Tests
         run: npm test
 
@@ -78,7 +85,8 @@ jobs:
       - name: Publish to npm
         run: |
           if [ -n "${{ secrets.NPM_TOKEN }}" ]; then
-            echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > ~/.npmrc
+            echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" \
+              > ~/.npmrc
             npm publish --access public
           else
             echo "NPM_TOKEN not set, skipping npm publish"

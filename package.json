@@ -1,6 +1,6 @@
 {
   "name": "pi-slash-anywhere",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Trigger slash commands, prompt templates, and skills anywhere inline in prompt messages with smart autocomplete and zero-friction expansion.",
   "type": "module",
   "main": "extensions/index.ts",

@@ -187,6 +187,50 @@ test("Path conflict resolution: /dir/file retreats to file completion and should
   assert.equal(triggerResult, false);
 });
 
+test("Terminated inline slash tokens suppress only automatic empty-prefix suggestions", async () => {
+  const delegated: string[] = [];
+  const current = createMockCurrentProvider({
+    async getSuggestions(lines) {
+      delegated.push(lines[0]);
+      return { prefix: "", items: [{ value: ".claude/", label: ".claude/" }] };
+    },
+  });
+  const provider = createInlineSlashAutocompleteProvider(current, () => mockCandidates);
+  const signal = new AbortController().signal;
+
+  for (const text of ["foo / ", "foo /help ", "foo /skill:git\t", "foo /review  "]) {
+    assert.equal(await provider.getSuggestions([text], 0, text.length, { signal }), null);
+    assert.equal(delegated.length, 0);
+  }
+
+  for (const text of ["/ ", "  /help ", "foo /dir/ ", "foo /dir/file ", "foo ", "foo /help @"]) {
+    const suggestions = await provider.getSuggestions([text], 0, text.length, { signal });
+    assert.deepEqual(suggestions, { prefix: "", items: [{ value: ".claude/", label: ".claude/" }] });
+    assert.equal(delegated.at(-1), text);
+  }
+
+  for (const text of ["foo / ", "foo /help"]) {
+    const suggestions = await provider.getSuggestions([text], 0, text.length, { signal, force: true });
+    assert.equal(delegated.at(-1), text);
+    assert.equal(suggestions?.items[0].value, ".claude/");
+  }
+});
+
+test("Native completion application preserves empty prefixes, paths, and attachments", () => {
+  const provider = createInlineSlashAutocompleteProvider(createMockCurrentProvider(), () => mockCandidates);
+  const item = { value: ".claude/", label: ".claude/" };
+  for (const [text, prefix, expected] of [
+    ["foo / ", "", "foo / .claude/"],
+    ["foo /dir/", "/dir/", "foo .claude/"],
+    ["foo @cl", "@cl", "foo .claude/"],
+    ["foo /help", "help", "foo /.claude/"],
+  ]) {
+    const result = provider.applyCompletion([text], 0, text.length, item, prefix);
+    assert.deepEqual(result.lines, [expected]);
+    assert.equal(result.cursorCol, expected.length);
+  }
+});
+
 test("Aggregation: candidates include commands, templates, and skills inline", async () => {
   const current = createMockCurrentProvider();
   const provider = createInlineSlashAutocompleteProvider(current, () => mockCandidates);

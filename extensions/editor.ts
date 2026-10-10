@@ -1,7 +1,7 @@
 import { CustomEditor } from "@earendil-works/pi-coding-agent";
 import type { KeybindingsManager } from "@earendil-works/pi-coding-agent";
 import type { TUI, EditorTheme } from "@earendil-works/pi-tui";
-import { INLINE_SLASH_TRIGGER } from "./autocomplete.js";
+import { getInlineSlashPrefix, INLINE_SLASH_TRIGGER } from "./autocomplete.js";
 
 /**
  * InlineSlashEditor wraps CustomEditor to trigger autocomplete for inline slash commands.
@@ -38,12 +38,25 @@ export class InlineSlashEditor extends CustomEditor {
 
     // If text before cursor matches inline slash trigger (e.g. " /" or " /cmd")
     if (INLINE_SLASH_TRIGGER.test(beforeCursor)) {
-      // tryTriggerAutocomplete is private in TypeScript definitions of Editor, but exists at runtime
+      // SAFETY: Native Editor implements this method at runtime but declares it private.
       (this as unknown as { tryTriggerAutocomplete?: (explicitTab?: boolean) => void }).tryTriggerAutocomplete?.();
     }
   }
 
   override handleInput(data: string): void {
+    if (data === " " && this.isShowingAutocomplete()) {
+      const cursor = this.getCursor();
+      const beforeCursor = (this.getLines()[cursor.line] ?? "").slice(0, cursor.col);
+      const prefix = getInlineSlashPrefix(beforeCursor);
+      // SAFETY: Native Editor owns these runtime members but declares them private.
+      const autocomplete = this as unknown as { autocompletePrefix?: string; cancelAutocomplete?: () => void };
+      // Async refresh can leave a shorter prefix from the same slash token selectable.
+      const menuPrefix = autocomplete.autocompletePrefix;
+      if (prefix !== null && menuPrefix?.startsWith("/") && prefix.startsWith(menuPrefix)) {
+        autocomplete.cancelAutocomplete?.();
+      }
+    }
+
     // Intercept Tab key when inline slash trigger is present and autocomplete isn't currently open
     if ((data === "\t" || data === "\x1b[Z") && !this.isShowingAutocomplete()) {
       const cursor = this.getCursor();
@@ -52,6 +65,7 @@ export class InlineSlashEditor extends CustomEditor {
       const beforeCursor = currentLine.slice(0, cursor.col);
       // Only handle inline triggers, not line-start triggers (line-start is native)
       if (!/^\s*\/[^\s]*$/.test(beforeCursor) && INLINE_SLASH_TRIGGER.test(beforeCursor)) {
+        // SAFETY: Native Editor implements this method at runtime but declares it private.
         (this as unknown as { tryTriggerAutocomplete?: (explicitTab?: boolean) => void }).tryTriggerAutocomplete?.(true);
         return;
       }

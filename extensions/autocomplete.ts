@@ -33,6 +33,15 @@ export function isLineStartSlashContext(lines: string[], cursorLine: number, cur
   return LINE_START_SLASH_REGEX.test(beforeCursor);
 }
 
+export function getInlineSlashPrefix(beforeCursor: string): string | null {
+  if (LINE_START_SLASH_REGEX.test(beforeCursor)) {
+    return null;
+  }
+  const match = beforeCursor.match(INLINE_SLASH_TRIGGER);
+  const token = match?.[1];
+  return token !== undefined && !token.includes("/") ? `/${token}` : null;
+}
+
 /**
  * Creates an AutocompleteProvider that layers inline slash command, prompt template,
  * and skill completion on top of the existing provider.
@@ -45,25 +54,23 @@ export function createInlineSlashAutocompleteProvider(
     triggerCharacters: Array.from(new Set([...(current.triggerCharacters ?? []), "/"])),
 
     async getSuggestions(lines: string[], cursorLine: number, cursorCol: number, options: { signal: AbortSignal; force?: boolean }): Promise<AutocompleteSuggestions | null> {
-      // If at line start / message start, delegate completely to current/native provider!
-      if (isLineStartSlashContext(lines, cursorLine, cursorCol)) {
+      if (options.force) {
         return current.getSuggestions(lines, cursorLine, cursorCol, options);
       }
 
       const line = lines[cursorLine] ?? "";
       const beforeCursor = line.slice(0, cursorCol);
-
-      const match = beforeCursor.match(INLINE_SLASH_TRIGGER);
-      if (!match) {
-        return current.getSuggestions(lines, cursorLine, cursorCol, options);
+      const trimmed = beforeCursor.trimEnd();
+      // A terminated inline token must not turn into native empty-prefix file suggestions.
+      if (trimmed !== beforeCursor && getInlineSlashPrefix(trimmed) !== null) {
+        return null;
       }
 
-      const token = match[1] ?? "";
-
-      // When query/token contains additional `/` (e.g. `/path/to/file`): yield to current provider
-      if (token.includes("/")) {
+      const prefix = getInlineSlashPrefix(beforeCursor);
+      if (prefix === null) {
         return current.getSuggestions(lines, cursorLine, cursorCol, options);
       }
+      const token = prefix.slice(1);
 
       const rawCandidates = await getCandidates();
 
@@ -106,8 +113,6 @@ export function createInlineSlashAutocompleteProvider(
         });
       }
 
-      const prefix = `/${token}`;
-
       let matchedItems: AutocompleteItem[] = [];
 
       if (!token) {
@@ -145,18 +150,13 @@ export function createInlineSlashAutocompleteProvider(
     },
 
     applyCompletion(lines: string[], cursorLine: number, cursorCol: number, item: AutocompleteItem, prefix: string) {
-      // If completing at line start, delegate completely to current/native provider!
-      if (isLineStartSlashContext(lines, cursorLine, cursorCol)) {
-        return current.applyCompletion(lines, cursorLine, cursorCol, item, prefix);
-      }
-
       const line = lines[cursorLine] ?? "";
       const beforeCursor = line.slice(0, cursorCol);
       const afterCursor = line.slice(cursorCol);
 
       // Replace the matched prefix (the `/` and token) with item.value + " "
       // and advance cursor column to right after the space.
-      if (beforeCursor.endsWith(prefix)) {
+      if (prefix === getInlineSlashPrefix(beforeCursor)) {
         const newLine = beforeCursor.slice(0, beforeCursor.length - prefix.length) + item.value + " " + afterCursor;
         const newCol = cursorCol - prefix.length + item.value.length + 1;
         const newLines = [...lines];
