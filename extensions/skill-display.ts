@@ -1,30 +1,33 @@
-interface LeadingSkillBlocks {
-  blocks: { name: string }[];
-  userTail: string;
+export interface ScanPlan {
+  blocks: { name: string; raw: string; ordinal: number; start: number; end: number }[];
+  tail: string;
+  valid: boolean;
 }
 
-function parseLeadingSkillBlocks(markdown: string): LeadingSkillBlocks {
-  const blocks: LeadingSkillBlocks["blocks"] = [];
-  let offset = 0;
-  let tailOffset = 0;
-  while (true) {
-    const match = markdown.slice(offset).match(
+export function scanLeadingSkills(markdown: string): ScanPlan {
+  const blocks: ScanPlan["blocks"] = [];
+  let start = 0;
+  let end = 0;
+  let valid = true;
+  while (markdown.startsWith("<skill", start)) {
+    const match = markdown.slice(start).match(
       /^<skill name="([^"\n]+)" location="([^"\n]+)">\n([\s\S]*?)\n<\/skill>(?=\n\n|$)/
     );
-    if (!match) break;
-    const [, name = "", , content = ""] = match;
-    if (/<skill[\s/>]/.test(content)) break;
-    blocks.push({ name });
-    tailOffset = offset + match[0].length;
-    if (!markdown.startsWith("\n\n", tailOffset)) break;
-    offset = tailOffset + 2;
+    if (!match || /<\/?skill(?:[\s/>])/.test(match[3]!)) {
+      valid = false;
+      break;
+    }
+    end = start + match[0].length;
+    blocks.push({ name: match[1]!, raw: match[0], ordinal: blocks.length, start, end });
+    if (!markdown.startsWith("\n\n", end)) break;
+    start = end + 2;
   }
-  return { blocks, userTail: markdown.slice(tailOffset) };
+  return { blocks, tail: markdown.slice(end), valid };
 }
 
 export function formatSkillDisplay(markdown: string, expanded: boolean, hint?: string): string {
   if (expanded) return markdown;
-  const { blocks, userTail } = parseLeadingSkillBlocks(markdown);
+  const { blocks, tail } = scanLeadingSkills(markdown);
   if (!blocks.length) return markdown;
-  return blocks.map(({ name }) => `[skill] ${name}${hint ? ` (${hint})` : ""}`).join("\n\n") + userTail;
+  return blocks.map(({ name }) => `[skill] ${name}${hint ? ` (${hint})` : ""}`).join("\n\n") + tail;
 }
