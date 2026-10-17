@@ -189,6 +189,66 @@ for (const stem of [screenshotStem, "请继续写中文"]) {
   }
 }
 
+test("synchronous raw sentence input cannot reuse a queued inline slash request", async (t) => {
+  const { editor, input, expectState } = await fixture(t);
+  const calls: string[] = [];
+  const requests: { text: string; inline: boolean }[] = [];
+  const state = editor as unknown as {
+    requestAutocomplete(options: { force: boolean; explicitTab: boolean }): void;
+  };
+  const request = state.requestAutocomplete.bind(editor);
+  state.requestAutocomplete = (options) => {
+    requests.push({ text: editor.getText(), inline: new Error().stack!.includes("checkAndTriggerInlineSlash") });
+    request(options);
+  };
+  const native = new CombinedAutocompleteProvider([], process.cwd(), "fd");
+  const provider = createInlineSlashAutocompleteProvider(native, () => candidates);
+  editor.setAutocompleteProvider({
+    ...provider,
+    getSuggestions(lines, line, col, options) {
+      calls.push(lines[line].slice(0, col));
+      return provider.getSuggestions(lines, line, col, options);
+    },
+  });
+  const sentence = screenshotStem + "。";
+  for (const character of sentence) editor.handleInput(character);
+  assert.deepEqual(calls, [], "request has not captured its snapshot before microtasks");
+  assert.equal(requests.at(-1)?.text, "请读取 /tmp");
+  assert.equal(requests.at(-1)?.inline, true, "last queued request originates in the plugin");
+  await input("");
+  t.diagnostic(JSON.stringify({ lastRequest: requests.at(-1), providerSnapshots: calls, menu: editor.isShowingAutocomplete() }));
+  assert.deepEqual(calls, [], "terminated inline request never reaches the native provider");
+  expectState(sentence, sentence.length, false);
+});
+
+test("synchronous inline input and pending Tab retain inline completion", async (t) => {
+  const { editor, input, expectState } = await fixture(t);
+  for (const character of "foo /hel") editor.handleInput(character);
+  editor.handleInput("\t");
+  await input("");
+  expectState("foo /hel", 8, true);
+  await input("\t");
+  expectState("foo /help ", 10, false);
+});
+
+test("synchronous native path input retains pending Tab completion", async (t) => {
+  const { editor, input, expectState, cwd } = await fixture(t);
+  for (const character of `foo ${cwd}/sub/nes`) editor.handleInput(character);
+  editor.handleInput("\t");
+  await input("");
+  const completed = `foo ${cwd}/sub/nested.txt`;
+  expectState(completed, completed.length, false);
+});
+
+test("synchronous native attachment input retains its automatic menu", async (t) => {
+  const { editor, input, expectState } = await fixture(t);
+  for (const character of "foo @sub/nes") editor.handleInput(character);
+  await input("");
+  expectState("foo @sub/nes", 12, true);
+  await input("\t");
+  expectState("foo @sub/nested.txt ", 20, false);
+});
+
 test("Tab accepts a native absolute path with multiple separators", async (t) => {
   const { editor, input, expectState, cwd } = await fixture(t);
   editor.setText(`foo ${cwd}/sub/nes`);
