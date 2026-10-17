@@ -1,43 +1,40 @@
-# Chinese period completion implementation notes
+# Chinese punctuation autocomplete fix
 
 ## Status
 
-- Regression tests. Done. `test/editor-handoff.test.ts` adds six cases. `/tmp/pi-chinese-period-red.log` proves three target failures before the fix. Test-first commit `0360ae6` preserves red history.
-- Eligibility fix. Done. `extensions/editor.ts` uses `getInlineSlashPrefix(beforeCursor) !== null` in automatic and Tab predicates. Full tests and typecheck pass.
-- Verification and delivery. Done. `/tmp/pi-chinese-period-green.log`, `/tmp/pi-chinese-period-typecheck.log`, and fresh Pi 1.3 captures prove the bounded acceptance criteria. Diff self-review completed. Commit and pause writes are the final handoff actions.
+- Eligibility. Done. Editor and provider reuse the same inline slash prefix decision. Paths with additional separators no longer initiate Inline Slash Completion.
+- Request ownership. Done locally at `fe11045c73c88d67bdf91fe0a0158934bb2bff06`. Each queued options object has an immutable native or inline owner. Installed menus have independent list-identity provenance. Native scheduling remains unchanged.
+- Tests. Passed on the implementation worktree. 99 tests, 85 passed, 14 existing host-card tests skipped, zero failures. Typecheck passed. Independent review found the completed forced-request leak, corrected in `35247737`; focused re-review found no further production blocker.
+- Terminal verification. Eight installed Pi 1.3.0 controls pass with readiness polling and current-pane capture. The same-session native path completion followed by valid inline template completion also passes, recorded in `/tmp/pi-period-owned-continuity-results.json`. Main-directory tests independently report 85 passed, 14 skipped and typecheck success in `/tmp/pi-period-final-integrated-npm.log` and `/tmp/pi-period-final-integrated-tsc.log`. Acceptance is complete for the scoped bug; PR publication is next.
 
-## Scope and throughput checkpoint
+## Why the original trigger failed
 
-One bounded worker unit, no nested agents. Parent supplied confirmed mechanism and fresh-process evidence in `/tmp/pi-chinese-period-repro-report.md`. Test, fix, and runtime verification are sequential dependencies. Keep exploration to editor/provider, existing tests, CONTEXT, and ADRs within the 20% context budget. No Pi core changes, new helper/types, provider punctuation changes, external actions, push, or PR.
+The editor matched path tokens more broadly than the provider. Chinese punctuation was not whitespace for the plugin regex. The provider rejected the path and delegated a request that native Pi interpreted as an empty file prefix after the punctuation.
 
-## Playbook
+The first eligibility fix passed separate punctuation input but failed synchronous batches. Native startup awaits a preceding task before capturing text and cursor. A plugin request queued at an earlier slash could therefore capture the final sentence and open directory suggestions.
 
-1. Reproduce it yourself on the matching surface via the control skill (Non-negotiables), even when a debug or instrumentation protocol says to ask the user to reproduce.
-2. Binary-search the cause.
-3. Plan the fix.
-4. Verify on the same surface.
-5. Stage the commits so the failing repro lands before the fix in git history.
-6. Run Opening a PR. Skip because parent explicitly prohibits push and PR.
+## Design decisions
 
-## Decisions
+Cursor eligibility, menu visibility and token changes do not establish request ownership. Prototypes using those signals broke native attachment takeover or forced-path cursor navigation. Those prototypes were discarded.
 
-- Existing `string | null` prefix is the eligibility model. Additional path separators and line-start commands return null. Reuse that result instead of maintaining editor-only regex decisions.
-- ADR-0001 requires native path completion to remain usable. Assert accepted text and cursor, not only menu absence.
-- Local dependencies are Pi 0.86.0. Runtime proof uses installed Pi 1.3.0 with only the worktree extension and fresh processes.
-- Advisor plan review requested actual input events, native path acceptance, line-start delegation, and verification of the red failure cause.
+The final adapter captures native or inline ownership before queuing. Inline ownership includes the line and token start column. A WeakMap associates the exact cloned native options object with that owner. Native request execution and currentness checks remain intact. Applied menu list identity records UI ownership only after installation.
 
-## Verification outcomes
+Pending work and installed UI are separate. Cleanup cancels only a still-live owned inline request, and clears only its installed menu. New native requests survive. Forced native pending work also prevents automatic inline requests from replacing it before a menu appears.
 
-- Red run used `node --import tsx --test test/editor-handoff.test.ts`. 21 tests, 18 passed, 3 failed. Exact screenshot text plus `。` failed with `true !== false` for the menu. Native absolute path Tab left `/nes` unchanged. An active inline menu transitioning into a path incorrectly reopened a menu.
-- Green run used `npm test`. 73 tests, 59 passed, 0 failed, 14 skipped. The skips are existing real-host skill-card tests requiring Pi 1.1.0 or 1.2.0 through `PI_PACKAGE_DIR`, not completion regressions. All 21 editor tests pass. `npm run typecheck` exits 0.
-- Fresh installed Pi 1.3 TUI with original extension reproduces the screenshot popup. Worktree extension has no popup for exact screenshot text with `。` or `.`, and no-path Chinese controls with either punctuation. Native Tab visibly changes `/tmp/pi-chinese-period-runtime/native/nes` to `/tmp/pi-chinese-period-runtime/native/nested.txt`.
-- Positive fixture controls visibly change `foo /periodpr` to `foo /periodprobe` and `foo /skill:periodpr` to `foo /skill:periodprobe` after Tab. Before captures contain the selected fixture menu. Evidence is `/tmp/pi-chinese-period-fixed-inline-{command,skill}-{after,tab}.txt` and `/tmp/pi-chinese-period-fixed-inline-results.json`.
-- Reproduction script is `/tmp/pi-chinese-period-fixed-runtime.mjs`. Each case launches a fresh process with `--offline --no-session --no-extensions` and an explicit single extension. Only local fixture skill and prompt are enabled for the positive controls. No Enter, model inference, or external publish occurs.
-- Local `node_modules` is a temporary symlink to original dependencies and is excluded from commits. No package or provider file changed. Production diff removes redundant editor predicates without adding functions, helpers, or types.
+Completed forced requests that directly insert a single result must release pending ownership. Otherwise they block later automatic inline completion. Open forced menus retain their ownership until native cancellation changes the token.
 
-## Deviations
+## Verification evidence
 
-- Initial `/mod` runtime control had no eligible candidate in the isolated configuration. Replaced it with explicit local fixtures. Initial menu detector recognized only directory arrows and missed visible slash menus. Corrected it to recognize the selected menu arrow. JSON expected text is now distinct from observed editor text. Partial fixture prefixes prove actual Tab acceptance. The earlier failed probe is not counted as a pass.
-- Terminal capture strips trailing spaces, so runtime assertions establish visible text and menu behavior. Unit tests establish exact trailing spaces and cursor positions. IME keystroke encoding is not simulated.
+- Initial and batch red evidence is preserved in the test-first commits and `/tmp/pi-period-batch-red.log`.
+- The source implementation is `b29edc86`, completed-force cleanup is `35247737`, and corrected serial-queue late-result tests are `fe11045c`.
+- `/tmp/pi-period-owned-ready-npm-test.log` reports 85 passed, 14 skipped, zero failed. `/tmp/pi-period-owned-ready-typecheck.log` records typecheck success.
+- `/tmp/pi-period-owned-ready-results.json` records literal observed text for active-batch, active-chars, batch, chars, bracketed paste, native path Tab, inline template and inline skill. `/tmp/pi-period-owned-runtime.mjs` waits for the actual empty editor and fixture resources before typing.
+- Independent reviewer `69930959` ran 12 focused tests and three cancellation probes with no new blocker. The earlier full review's two invalid double-resolve tests were replaced with real leave-and-return and queued-native ordering.
 
-- No nested how/why exploration because parent owns orchestration and forbids nested agents. Confirmed parent diagnosis bounds investigation.
+## Limits
+
+The adapter uses private native editor methods. The relevant methods were inspected in local Pi 0.86 and installed Pi 1.3.0. Future native changes require compatibility validation. The full files were not byte-identical. The 14 skipped tests require separate real-host skill-card fixtures and do not exercise this completion path. Terminal tests do not emulate macOS IME composition. Captures trim trailing spaces; unit tests assert exact text and cursor positions.
+
+## Delivery
+
+The operator authorizes publication of a ready PR after validation. No merge is authorized. Original development commits and branch are preserved. Publication will use a separate bookmark. Temporary scripts and logs remain local; no dependencies or credentials belong in the PR.
