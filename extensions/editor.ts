@@ -1,7 +1,7 @@
 import { CustomEditor } from "@earendil-works/pi-coding-agent";
 import type { KeybindingsManager } from "@earendil-works/pi-coding-agent";
 import type { TUI, EditorTheme } from "@earendil-works/pi-tui";
-import { getInlineSlashPrefix, INLINE_SLASH_TRIGGER } from "./autocomplete.js";
+import { getInlineSlashPrefix } from "./autocomplete.js";
 
 /**
  * InlineSlashEditor wraps CustomEditor to trigger autocomplete for inline slash commands.
@@ -31,13 +31,7 @@ export class InlineSlashEditor extends CustomEditor {
     const currentLine = lines[cursor.line] || "";
     const beforeCursor = currentLine.slice(0, cursor.col);
 
-    // Skip if cursor is at line-start slash context (handled natively by Editor)
-    if (/^\s*\/[^\s]*$/.test(beforeCursor)) {
-      return;
-    }
-
-    // If text before cursor matches inline slash trigger (e.g. " /" or " /cmd")
-    if (INLINE_SLASH_TRIGGER.test(beforeCursor)) {
+    if (getInlineSlashPrefix(beforeCursor) !== null) {
       // SAFETY: Native Editor implements this method at runtime but declares it private.
       (this as unknown as { tryTriggerAutocomplete?: (explicitTab?: boolean) => void }).tryTriggerAutocomplete?.();
     }
@@ -63,8 +57,7 @@ export class InlineSlashEditor extends CustomEditor {
       const lines = this.getLines();
       const currentLine = lines[cursor.line] || "";
       const beforeCursor = currentLine.slice(0, cursor.col);
-      // Only handle inline triggers, not line-start triggers (line-start is native)
-      if (!/^\s*\/[^\s]*$/.test(beforeCursor) && INLINE_SLASH_TRIGGER.test(beforeCursor)) {
+      if (getInlineSlashPrefix(beforeCursor) !== null) {
         // SAFETY: Native Editor implements this method at runtime but declares it private.
         (this as unknown as { tryTriggerAutocomplete?: (explicitTab?: boolean) => void }).tryTriggerAutocomplete?.(true);
         return;
