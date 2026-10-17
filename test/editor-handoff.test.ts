@@ -660,66 +660,125 @@ test("a different slash anchor cannot inherit the previous inline request", asyn
   expectState("foo /hel /review ", 17, false);
 });
 
-test("a queued inline request cannot claim a later path or attachment snapshot", async (t) => {
+function holdFirstProvider(
+  editor: InlineSlashEditor,
+  cwd: string,
+): { started: Promise<void>; release: () => void; providerCalls: () => number; inlineCallbacks: () => number } {
+  let releaseFirst: (() => void) | undefined;
+  let markStarted: (() => void) | undefined;
+  const started = new Promise<void>((resolve) => {
+    markStarted = resolve;
+  });
+  let calls = 0;
+  let inlineCallbacks = 0;
+  const native = new CombinedAutocompleteProvider([], cwd, "fd");
+  const provider = createInlineSlashAutocompleteProvider(native, () => {
+    inlineCallbacks += 1;
+    return candidates;
+  });
+  editor.setAutocompleteProvider({
+    ...provider,
+    getSuggestions(lines, line, col, options) {
+      if (calls === 0) {
+        calls = 1;
+        markStarted!();
+        return new Promise((resolve) => {
+          releaseFirst = () => resolve({ prefix: "held", items: [{ value: "held", label: "held" }] });
+        });
+      }
+      calls += 1;
+      return provider.getSuggestions(lines, line, col, options);
+    },
+  });
+  return {
+    started,
+    release: () => releaseFirst!(),
+    providerCalls: () => calls,
+    inlineCallbacks: () => inlineCallbacks,
+  };
+}
+
+test("a queued inline refresh behind a running native request becomes a forced path", async (t) => {
   const { editor, input, expectState, cwd } = await fixture(t);
-  let releaseInline: ((items: SlashCommandInfo[]) => void) | undefined;
-  editor.setAutocompleteProvider(createInlineSlashAutocompleteProvider(
-    new CombinedAutocompleteProvider([], cwd, "fd"),
-    () => new Promise((resolve) => { releaseInline = resolve; }),
-  ));
+  const held = holdFirstProvider(editor, cwd);
+  editor.setText("foo ");
+  editor.handleInput("@");
+  t.mock.timers.runAll();
+  await held.started;
+  assert.equal(held.providerCalls(), 1, "preceding native provider has started");
+  assert.equal(held.inlineCallbacks(), 0);
+  const state = editor as unknown as RequestState;
+  const runningNative = state.pending?.request;
+  assert.ok(runningNative);
+  assert.equal(runningNative.owner.kind, "native");
+  assert.equal(runningNative.options.force, false);
+
+  editor.handleInput("\x7f");
+  editor.handleInput("/");
+  assert.equal(editor.getText(), "foo /");
+  assert.equal(held.providerCalls(), 1, "inline refresh is queued behind the running native request");
+  assert.equal(held.inlineCallbacks(), 0);
+  const queuedInline = state.pending?.request;
+  assert.ok(queuedInline);
+  assert.notEqual(queuedInline, runningNative);
+  assert.equal(queuedInline.owner.kind, "inline");
+  assert.equal(queuedInline.options.force, false);
+
+  const pathText = `foo / ${cwd}/sub/nes`;
+  for (const character of ` ${cwd}/sub/nes`) editor.handleInput(character);
+  assert.equal(editor.getText(), pathText);
+  assert.equal(held.providerCalls(), 1);
+  assert.equal(held.inlineCallbacks(), 0, "queued inline callback has not entered");
+  editor.handleInput("\t");
+  const queuedForced = state.pending?.request;
+  assert.ok(queuedForced);
+  assert.notEqual(queuedForced, queuedInline);
+  assert.equal(held.providerCalls(), 1, "forced path request is still queued");
+  assert.equal(queuedForced.owner.kind, "native");
+  assert.equal(queuedForced.options.force, true);
+
+  held.release();
+  await input("");
+  const completed = `foo / ${cwd}/sub/nested.txt`;
+  expectState(completed, completed.length, false);
+  assert.equal(held.inlineCallbacks(), 0, "queued inline request never called the slash provider");
+});
+
+test("a queued native attachment refresh behind a running inline request stays native", async (t) => {
+  const { editor, input, expectState, cwd } = await fixture(t);
+  const held = holdFirstProvider(editor, cwd);
   editor.setText("foo ");
   editor.handleInput("/");
-  await Promise.resolve();
-  assert.equal(typeof releaseInline, "function");
+  await held.started;
+  assert.equal(held.providerCalls(), 1, "preceding inline provider has started");
+  assert.equal(held.inlineCallbacks(), 0, "slash callback has not returned from the held provider");
+  const state = editor as unknown as RequestState;
+  const runningInline = state.pending?.request;
+  assert.ok(runningInline);
+  assert.equal(runningInline.owner.kind, "inline");
+  assert.equal(runningInline.options.force, false);
 
-  const state = editor as unknown as RequestState & {
-    insertTextAtCursorInternal(text: string): void;
-    handleTabCompletion(): void;
-  };
-  const queuedPath = state.pending?.request;
-  assert.equal(queuedPath?.owner.kind, "inline");
-  assert.equal(queuedPath?.options.force, false);
-  const pathText = `foo / ${cwd}/sub/nes`;
-  state.insertTextAtCursorInternal(` ${cwd}/sub/nes`);
-  assert.equal(editor.getText(), pathText);
-  assert.equal(state.pending?.request, queuedPath);
-  state.handleTabCompletion();
-  assert.equal(state.pending?.request.owner.kind, "native");
-  assert.equal(state.pending?.request.options.force, true);
-  releaseInline!(candidates);
-  await input("");
-  const completedPath = `foo / ${cwd}/sub/nested.txt`;
-  expectState(completedPath, completedPath.length, false);
-
-  let releaseSecond: ((items: SlashCommandInfo[]) => void) | undefined;
-  editor.setAutocompleteProvider(createInlineSlashAutocompleteProvider(
-    new CombinedAutocompleteProvider([], cwd, "fd"),
-    () => new Promise((resolve) => { releaseSecond = resolve; }),
-  ));
-  editor.setText("bar ");
-  editor.handleInput("/");
-  await Promise.resolve();
-  assert.equal(typeof releaseSecond, "function");
-  const queuedAttachment = state.pending?.request;
-  assert.equal(queuedAttachment?.owner.kind, "inline");
-  assert.equal(queuedAttachment?.options.force, false);
-  state.insertTextAtCursorInternal(" @");
-  assert.equal(editor.getText(), "bar / @");
-  assert.equal(state.pending?.request, queuedAttachment);
   editor.handleInput("\x7f");
   editor.handleInput("@");
-  assert.equal(editor.getText(), "bar / @");
-  assert.equal(state.pending?.request.owner.kind, "native");
-  assert.equal(state.pending?.request.options.force, false);
-  releaseSecond!(candidates);
+  assert.equal(editor.getText(), "foo @");
+  assert.equal(held.providerCalls(), 1, "attachment refresh is queued behind the running inline request");
+  assert.equal(held.inlineCallbacks(), 0, "queued slash callback has not entered");
+  const queuedNative = state.pending?.request;
+  assert.ok(queuedNative);
+  assert.notEqual(queuedNative, runningInline);
+  assert.equal(queuedNative.owner.kind, "native");
+  assert.equal(queuedNative.options.force, false);
+
+  held.release();
   await input("");
-  expectState("bar / @", 7, true);
+  expectState("foo @", 5, true);
   assert.equal(state.autocompleteList?.getSelectedItem()?.value, "@sub/");
   assert.equal(state.autocompleteState, "regular");
+  assert.equal(held.inlineCallbacks(), 0, "queued slash callback did not run for the attachment");
   for (const character of "sub/nes") await input(character);
-  expectState("bar / @sub/nes", 14, true);
+  expectState("foo @sub/nes", 12, true);
   await input("\t");
-  expectState("bar / @sub/nested.txt ", 22, false);
+  expectState("foo @sub/nested.txt ", 20, false);
 });
 
 test("an untagged autocomplete request stays native", async (t) => {
