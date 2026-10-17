@@ -507,8 +507,6 @@ test("leaving and returning to the same slash anchor confirms the replacement, n
   await input("");
   const selected = (editor as unknown as RequestState).autocompleteList?.getSelectedItem();
   assert.deepEqual(selected && { value: selected.value, label: selected.label }, { value: "/beta", label: "/beta" });
-  const afterLate = (editor as unknown as RequestState).autocompleteList?.getSelectedItem();
-  assert.deepEqual(afterLate && { value: afterLate.value, label: afterLate.label }, { value: "/beta", label: "/beta" });
   await input("\t");
   expectState("foo /beta ", 10, false);
 });
@@ -527,7 +525,7 @@ test("a completed native forced request does not block the next inline menu", as
   expectState("foo ./sub/nested.txt /help ", 27, false);
 });
 
-test("an old inline result cannot replace a native menu installed while it was pending", async (t) => {
+test("a queued native replacement outlives the inline request it interrupted", async (t) => {
   const { editor, input, expectState, cwd } = await fixture(t);
   let releaseInline: ((items: SlashCommandInfo[]) => void) | undefined;
   editor.setAutocompleteProvider(createInlineSlashAutocompleteProvider(
@@ -538,24 +536,22 @@ test("an old inline result cannot replace a native menu installed while it was p
   editor.handleInput("/");
   await Promise.resolve();
   assert.equal(typeof releaseInline, "function");
-  releaseInline!([]);
   editor.onExtensionShortcut = (data) => {
     if (data !== "\u0010") return false;
-    editor.insertTextAtCursor(` ${cwd}/sub/`);
+    editor.insertTextAtCursor(` ${cwd}/sub/nes`);
     (editor as unknown as { handleTabCompletion(): void }).handleTabCompletion();
     return true;
   };
-  await input("\u0010");
-  const text = `foo / ${cwd}/sub/`;
-  expectState(text, text.length, true);
-  const nativeSelected = (editor as unknown as RequestState).autocompleteList?.getSelectedItem()?.value;
-  releaseInline!(candidates);
-  await input("");
-  expectState(text, text.length, true);
-  assert.equal((editor as unknown as RequestState).autocompleteList?.getSelectedItem()?.value, nativeSelected);
+  const queued = input("\u0010");
+  const text = `foo / ${cwd}/sub/nes`;
+  assert.equal(editor.getText(), text);
+  assert.equal((editor as unknown as RequestState).pending?.request.owner.kind, "native");
+  releaseInline!([]);
+  await queued;
+  const completed = `foo / ${cwd}/sub/nested.txt`;
+  expectState(completed, completed.length, false);
   await input("\t");
-  assert.equal(editor.getText().startsWith(text), true);
-  assert.equal(editor.isShowingAutocomplete(), false);
+  expectState(completed, completed.length, false);
 });
 
 test("clearing an old inline menu preserves a newer native request", async (t) => {
