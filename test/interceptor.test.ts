@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   stripFrontmatter,
   transformPromptWithSkills,
@@ -221,4 +223,41 @@ test("smoke test: index entry registers both autocomplete and interceptor", () =
   slashAnywhereExtension(mockPi as any);
   assert.ok(eventsRegistered.includes("session_start"));
   assert.ok(eventsRegistered.includes("input"));
+});
+
+test("inline skill expansion uses the skill directory as its reference base", async () => {
+  const skillPath = fileURLToPath(new URL("fixtures/demo-skill/SKILL.md", import.meta.url));
+  const skillDir = dirname(skillPath);
+
+  let registeredHandler: ((event: any) => Promise<any>) | undefined;
+  const mockPi = {
+    on: (event: string, handler: any) => {
+      if (event === "input") {
+        registeredHandler = handler;
+      }
+      return () => {};
+    },
+    getCommands: () => [
+      {
+        name: "skill:demo-skill",
+        source: "skill",
+        // The registration root holds the skills tree, so it sits above the skill itself.
+        sourceInfo: { path: skillPath, baseDir: dirname(skillDir) },
+      },
+    ],
+    getFlag: () => undefined,
+  };
+
+  registerInlineSkillInterceptor(mockPi as any);
+  assert.ok(registeredHandler !== undefined);
+
+  const res = await registeredHandler({
+    type: "input",
+    source: "interactive",
+    text: "Read /skill:demo-skill before you start.",
+  });
+
+  assert.equal(res.action, "transform");
+  assert.ok(res.text.includes(`References are relative to ${skillDir}.`));
+  assert.ok(res.text.includes("Demo skill content."));
 });

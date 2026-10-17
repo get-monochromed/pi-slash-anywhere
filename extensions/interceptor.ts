@@ -54,7 +54,7 @@ export function createDefaultSkillResolver(pi: ExtensionAPI): SkillResolver {
       }
 
       const filePath = target.sourceInfo.path;
-      const baseDir = target.sourceInfo.baseDir || dirname(filePath);
+      const baseDir = dirname(filePath);
       const content = readFileSync(filePath, "utf-8");
 
       return {
