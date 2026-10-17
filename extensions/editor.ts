@@ -107,6 +107,8 @@ export class InlineSlashEditor extends CustomEditor {
 		if (menu && native.autocompleteList === menu.list && native.autocompleteState === "regular") {
 			return this.ownsCurrentContext(menu.context) ? { kind: "inline", context: menu.context } : undefined;
 		}
+		const context = this.currentInlineContext();
+		if (context) return { kind: "inline", context };
 		return { kind: "native" };
 	}
 

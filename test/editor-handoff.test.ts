@@ -118,7 +118,11 @@ test("SPACE after a native attachment menu becomes inline slash cannot accept /h
   assert.deepEqual(editor.getCursor(), { line: 0, col: 6 }, "editor cursor");
   editor.handleInput("\t");
   await input("");
-  expectState("foo / ", 6, false);
+  expectState("foo / ", 6, true);
+  assert.equal(
+    (editor as unknown as RequestState).autocompleteList?.getSelectedItem()?.value,
+    ".claude/",
+  );
 });
 
 test("SPACE after a native attachment menu becomes inline slash cannot submit foo //help on immediate Enter", async (t) => {
@@ -654,6 +658,68 @@ test("a different slash anchor cannot inherit the previous inline request", asyn
   expectState("foo /hel /rev", 13, true);
   await input("\t");
   expectState("foo /hel /review ", 17, false);
+});
+
+test("a queued inline request cannot claim a later path or attachment snapshot", async (t) => {
+  const { editor, input, expectState, cwd } = await fixture(t);
+  let releaseInline: ((items: SlashCommandInfo[]) => void) | undefined;
+  editor.setAutocompleteProvider(createInlineSlashAutocompleteProvider(
+    new CombinedAutocompleteProvider([], cwd, "fd"),
+    () => new Promise((resolve) => { releaseInline = resolve; }),
+  ));
+  editor.setText("foo ");
+  editor.handleInput("/");
+  await Promise.resolve();
+  assert.equal(typeof releaseInline, "function");
+
+  const state = editor as unknown as RequestState & {
+    insertTextAtCursorInternal(text: string): void;
+    handleTabCompletion(): void;
+  };
+  const queuedPath = state.pending?.request;
+  assert.equal(queuedPath?.owner.kind, "inline");
+  assert.equal(queuedPath?.options.force, false);
+  const pathText = `foo / ${cwd}/sub/nes`;
+  state.insertTextAtCursorInternal(` ${cwd}/sub/nes`);
+  assert.equal(editor.getText(), pathText);
+  assert.equal(state.pending?.request, queuedPath);
+  state.handleTabCompletion();
+  assert.equal(state.pending?.request.owner.kind, "native");
+  assert.equal(state.pending?.request.options.force, true);
+  releaseInline!(candidates);
+  await input("");
+  const completedPath = `foo / ${cwd}/sub/nested.txt`;
+  expectState(completedPath, completedPath.length, false);
+
+  let releaseSecond: ((items: SlashCommandInfo[]) => void) | undefined;
+  editor.setAutocompleteProvider(createInlineSlashAutocompleteProvider(
+    new CombinedAutocompleteProvider([], cwd, "fd"),
+    () => new Promise((resolve) => { releaseSecond = resolve; }),
+  ));
+  editor.setText("bar ");
+  editor.handleInput("/");
+  await Promise.resolve();
+  assert.equal(typeof releaseSecond, "function");
+  const queuedAttachment = state.pending?.request;
+  assert.equal(queuedAttachment?.owner.kind, "inline");
+  assert.equal(queuedAttachment?.options.force, false);
+  state.insertTextAtCursorInternal(" @");
+  assert.equal(editor.getText(), "bar / @");
+  assert.equal(state.pending?.request, queuedAttachment);
+  editor.handleInput("\x7f");
+  editor.handleInput("@");
+  assert.equal(editor.getText(), "bar / @");
+  assert.equal(state.pending?.request.owner.kind, "native");
+  assert.equal(state.pending?.request.options.force, false);
+  releaseSecond!(candidates);
+  await input("");
+  expectState("bar / @", 7, true);
+  assert.equal(state.autocompleteList?.getSelectedItem()?.value, "@sub/");
+  assert.equal(state.autocompleteState, "regular");
+  for (const character of "sub/nes") await input(character);
+  expectState("bar / @sub/nes", 14, true);
+  await input("\t");
+  expectState("bar / @sub/nested.txt ", 22, false);
 });
 
 test("an untagged autocomplete request stays native", async (t) => {
