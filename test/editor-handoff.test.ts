@@ -55,7 +55,7 @@ async function fixture(t: TestContext) {
     assert.equal(editor.isShowingAutocomplete(), menu, "autocomplete menu");
   }
 
-  return { editor, input, expectState };
+  return { editor, input, expectState, cwd };
 }
 
 test("inline slash SPACE closes the menu without replacing the typed token", async (t) => {
@@ -175,6 +175,40 @@ for (const scenario of [
     expectState(scenario.text, scenario.col, false);
   });
 }
+
+const screenshotStem = "请读取 /tmp/pi-subagents-migration-handoff-20261017.md，按交接文档继续。以已安装插件源码确认功能，不新增模型实测";
+
+for (const stem of [screenshotStem, "请继续写中文"]) {
+  for (const punctuation of ["。", "."]) {
+    test(`typing ${punctuation} after ${stem} keeps the editor menu closed`, async (t) => {
+      const { editor, input, expectState } = await fixture(t);
+      editor.setText(stem);
+      await input(punctuation);
+      expectState(stem + punctuation, stem.length + punctuation.length, false);
+    });
+  }
+}
+
+test("Tab accepts a native absolute path with multiple separators", async (t) => {
+  const { editor, input, expectState, cwd } = await fixture(t);
+  editor.setText(`foo ${cwd}/sub/nes`);
+  await input("\t");
+  const completed = `foo ${cwd}/sub/nested.txt`;
+  expectState(completed, completed.length, false);
+});
+
+test("an active inline slash menu yields to native path Tab after another separator", async (t) => {
+  const { editor, input, expectState, cwd } = await fixture(t);
+  editor.setText("foo ");
+  await input("/");
+  expectState("foo /", 5, true);
+  for (const character of `${cwd.slice(1)}/sub/nes`) await input(character);
+  const path = `foo ${cwd}/sub/nes`;
+  expectState(path, path.length, false);
+  await input("\t");
+  const completed = `foo ${cwd}/sub/nested.txt`;
+  expectState(completed, completed.length, false);
+});
 
 test("line-start slash delegates native command names rather than inline candidates", async (t) => {
   const { input, expectState } = await fixture(t);
