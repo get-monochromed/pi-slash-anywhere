@@ -69,14 +69,9 @@ export class InlineSlashEditor extends CustomEditor {
 		this.nativeRequest = native.requestAutocomplete.bind(this);
 		this.nativeRun = native.runAutocompleteRequest.bind(this);
 		this.nativeApply = native.applyAutocompleteSuggestions.bind(this);
-		native.requestAutocomplete = (options) => {
-			this.requestOwnedAutocomplete(options);
-		};
-		native.runAutocompleteRequest = (requestId, controller, snapshotText, snapshotLine, snapshotCol, options) =>
-			this.runOwnedAutocomplete(requestId, controller, snapshotText, snapshotLine, snapshotCol, options);
-		native.applyAutocompleteSuggestions = (suggestions, state) => {
-			this.applyOwnedSuggestions(suggestions, state);
-		};
+		native.requestAutocomplete = this.requestOwnedAutocomplete.bind(this);
+		native.runAutocompleteRequest = this.runOwnedAutocomplete.bind(this);
+		native.applyAutocompleteSuggestions = this.applyOwnedSuggestions.bind(this);
 	}
 
 	private currentInlineContext(): InlineContext | undefined {
@@ -175,13 +170,17 @@ export class InlineSlashEditor extends CustomEditor {
 		options: RequestOptions,
 	): Promise<void> {
 		const owned = this.ownership.get(options) ?? { owner: { kind: "native" as const }, options };
-		if (owned.owner.kind === "inline" && !this.ownsCurrentContext(owned.owner.context)) {
-			this.clearInstalledInlineMenu(owned.owner.context);
-			return Promise.resolve();
-		}
-		this.running = owned;
-		return this.nativeRun(requestId, controller, snapshotText, snapshotLine, snapshotCol, options).finally(() => {
+		const skipped = owned.owner.kind === "inline" && !this.ownsCurrentContext(owned.owner.context);
+		if (skipped) this.clearInstalledInlineMenu(owned.owner.context);
+		else this.running = owned;
+		const run = skipped
+			? Promise.resolve()
+			: this.nativeRun(requestId, controller, snapshotText, snapshotLine, snapshotCol, options);
+		return run.finally(() => {
 			if (this.running === owned) this.running = undefined;
+			if (this.pending?.request === owned && this.nativeSurface().autocompleteState === null) {
+				this.pending = undefined;
+			}
 		});
 	}
 
@@ -210,9 +209,7 @@ export class InlineSlashEditor extends CustomEditor {
 		}
 		const menu = this.inlineMenu;
 		if (menu && native.autocompleteList === menu.list && !this.ownsCurrentContext(menu.context)) {
-			native.clearAutocompleteUi();
-			this.inlineMenu = undefined;
-			this.tui.requestRender();
+			this.clearInstalledInlineMenu();
 		}
 	}
 

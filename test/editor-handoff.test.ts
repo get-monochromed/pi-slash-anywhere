@@ -500,18 +500,31 @@ test("leaving and returning to the same slash anchor confirms the replacement, n
   editor.handleInput("/");
   await Promise.resolve();
   assert.equal(typeof releaseFirst, "function");
-  releaseFirst!([{ value: "/alpha", label: "/alpha" }]);
-  editor.handleInput("x");
+  editor.handleInput(" ");
   editor.handleInput("\x7f");
+  assert.equal(editor.getText(), "foo /");
+  releaseFirst!([{ value: "/alpha", label: "/alpha" }]);
   await input("");
   const selected = (editor as unknown as RequestState).autocompleteList?.getSelectedItem();
   assert.deepEqual(selected && { value: selected.value, label: selected.label }, { value: "/beta", label: "/beta" });
-  releaseFirst!([{ value: "/alpha", label: "/alpha" }]);
-  await input("");
   const afterLate = (editor as unknown as RequestState).autocompleteList?.getSelectedItem();
   assert.deepEqual(afterLate && { value: afterLate.value, label: afterLate.label }, { value: "/beta", label: "/beta" });
   await input("\t");
   expectState("foo /beta ", 10, false);
+});
+
+test("a completed native forced request does not block the next inline menu", async (t) => {
+  const { editor, input, expectState } = await fixture(t);
+  editor.setText("foo ./sub/nes");
+  await input("\t");
+  expectState("foo ./sub/nested.txt", 20, false);
+  const state = editor as unknown as RequestState;
+  assert.equal(state.pending, undefined);
+  for (const character of " /hel") editor.handleInput(character);
+  await input("");
+  expectState("foo ./sub/nested.txt /hel", 25, true);
+  await input("\t");
+  expectState("foo ./sub/nested.txt /help ", 27, false);
 });
 
 test("an old inline result cannot replace a native menu installed while it was pending", async (t) => {
