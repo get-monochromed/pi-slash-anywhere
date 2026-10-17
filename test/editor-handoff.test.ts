@@ -94,6 +94,80 @@ test("Tab after inline slash SPACE opens files without inserting .claude", async
   expectState("foo / ", 6, true);
 });
 
+async function openRegularAttachmentThenInlineSlash(
+  editor: InlineSlashEditor,
+  input: (data: string) => Promise<void>,
+  expectState: (text: string, col: number, menu: boolean, line?: number) => void,
+) {
+  editor.setText("foo ");
+  await input("@");
+  expectState("foo @", 5, true);
+  editor.handleInput("\x7f");
+  editor.handleInput("/");
+  await input("");
+  expectState("foo /", 5, true);
+  const selected = (editor as unknown as RequestState).autocompleteList?.getSelectedItem();
+  assert.equal(selected?.value, "/help");
+}
+
+test("SPACE after a native attachment menu becomes inline slash cannot accept /help on immediate Tab", async (t) => {
+  const { editor, input, expectState } = await fixture(t);
+  await openRegularAttachmentThenInlineSlash(editor, input, expectState);
+  editor.handleInput(" ");
+  assert.equal(editor.getText(), "foo / ", "editor text");
+  assert.deepEqual(editor.getCursor(), { line: 0, col: 6 }, "editor cursor");
+  editor.handleInput("\t");
+  await input("");
+  expectState("foo / ", 6, false);
+});
+
+test("SPACE after a native attachment menu becomes inline slash cannot submit foo //help on immediate Enter", async (t) => {
+  const { editor, input, expectState } = await fixture(t);
+  const submitted: string[] = [];
+  editor.onSubmit = (text) => submitted.push(text);
+  await openRegularAttachmentThenInlineSlash(editor, input, expectState);
+  editor.handleInput(" ");
+  assert.equal(editor.getText(), "foo / ", "editor text");
+  assert.deepEqual(editor.getCursor(), { line: 0, col: 6 }, "editor cursor");
+  editor.handleInput("\r");
+  await input("");
+  assert.deepEqual(submitted, ["foo /"]);
+  expectState("", 0, false);
+});
+
+test("Tab accepts /help after a native attachment menu becomes inline slash when SPACE was not typed", async (t) => {
+  const { editor, input, expectState } = await fixture(t);
+  await openRegularAttachmentThenInlineSlash(editor, input, expectState);
+  editor.handleInput("\t");
+  await input("");
+  expectState("foo /help ", 10, false);
+});
+
+test("Enter submits foo /help after a native attachment menu becomes inline slash when SPACE was not typed", async (t) => {
+  const { editor, input, expectState } = await fixture(t);
+  const submitted: string[] = [];
+  editor.onSubmit = (text) => submitted.push(text);
+  await openRegularAttachmentThenInlineSlash(editor, input, expectState);
+  editor.handleInput("\r");
+  await input("");
+  assert.deepEqual(submitted, ["foo /help"]);
+  expectState("", 0, false);
+});
+
+test("Tab after SPACE and a drained queue does not accept the ended inline slash token", async (t) => {
+  const { editor, input, expectState } = await fixture(t);
+  await openRegularAttachmentThenInlineSlash(editor, input, expectState);
+  await input(" ");
+  expectState("foo / ", 6, false);
+  editor.handleInput("\t");
+  await input("");
+  expectState("foo / ", 6, true);
+  assert.equal(
+    (editor as unknown as RequestState).autocompleteList?.getSelectedItem()?.value,
+    ".claude/",
+  );
+});
+
 test("immediate Tab after SPACE cannot accept the stale inline slash menu", async (t) => {
   const { editor, input, expectState } = await fixture(t);
   editor.setText("foo ");
