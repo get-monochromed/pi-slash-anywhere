@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type { ExtensionAPI, InputEvent, InputEventResult } from "@earendil-works/pi-coding-agent";
+import { isInertSlash, unescapeSkillTokens } from "./escaping.js";
 
 /**
  * Regex matching inline skill references: /skill:<name>
@@ -85,9 +86,13 @@ export async function transformPromptWithSkills(
     return null;
   }
 
-  const matches = Array.from(text.matchAll(INLINE_SKILL_REGEX));
+  const promptText = unescapeSkillTokens(text);
+  // Skip tokens the user escaped with `\/` or wrapped in quotes.
+  const matches = Array.from(text.matchAll(INLINE_SKILL_REGEX)).filter(
+    (match) => match.index !== undefined && !isInertSlash(text, match.index)
+  );
   if (matches.length === 0) {
-    return null;
+    return promptText === text ? null : promptText;
   }
 
   // Deduplicate unique skill names preserving appearance order
@@ -129,11 +134,11 @@ export async function transformPromptWithSkills(
   }
 
   if (skillBlocks.length === 0) {
-    return null;
+    return promptText === text ? null : promptText;
   }
 
   // Prepend resolved skill blocks at the very top of the user prompt
-  return `${skillBlocks.join("\n\n")}\n\n${text}`;
+  return `${skillBlocks.join("\n\n")}\n\n${promptText}`;
 }
 
 /**

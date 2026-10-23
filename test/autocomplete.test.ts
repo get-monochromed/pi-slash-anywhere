@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import type { AutocompleteProvider, AutocompleteItem, AutocompleteSuggestions } from "@earendil-works/pi-tui";
 import type { SlashCommandInfo } from "@earendil-works/pi-coding-agent";
-import { createInlineSlashAutocompleteProvider } from "../extensions/autocomplete.js";
+import { createInlineSlashAutocompleteProvider, getInlineSlashPrefix } from "../extensions/autocomplete.js";
 
 function createMockCurrentProvider(overrides: Partial<AutocompleteProvider> = {}): AutocompleteProvider {
   return {
@@ -363,4 +363,32 @@ test("applyCompletion: replaces token, adds trailing space, cursor is placed aft
   const customProvider = createInlineSlashAutocompleteProvider(customCurrent, () => mockCandidates);
   customProvider.applyCompletion(["something /test"], 0, 15, item, "/unknown");
   assert.equal(fallbackApplyCalled, true);
+});
+
+test("escape: escaped and quoted slashes do not open the inline menu or claim file completion", async () => {
+  const current = createMockCurrentProvider();
+  const provider = createInlineSlashAutocompleteProvider(current, () => mockCandidates);
+  const signal = new AbortController().signal;
+
+  // Escaped token falls through to the native/file provider.
+  assert.equal(getInlineSlashPrefix("check \\/skill:git"), null);
+  assert.equal(getInlineSlashPrefix('see "/skill:git'), null);
+  assert.equal(getInlineSlashPrefix("see '/skill:git"), null);
+  assert.equal(getInlineSlashPrefix("see `/skill:git"), null);
+
+  // Unquoted tokens still trigger.
+  assert.equal(getInlineSlashPrefix("check /skill:git"), "/skill:git");
+  assert.equal(getInlineSlashPrefix("don't use /skill:git"), "/skill:git");
+
+  // Quoted token does not suppress native file completion anymore.
+  const quoted = ['see "/dir/fi'];
+  const quotedSuggestions = await provider.getSuggestions(quoted, 0, quoted[0].length, { signal });
+  assert.deepEqual(quotedSuggestions?.items, [{ value: "mock-file.txt", label: "mock-file.txt" }]);
+  assert.equal(provider.shouldTriggerFileCompletion!(['see "/dir/fi'], 0, 12), true);
+
+  // Unquoted token still owns completion.
+  const inline = ["check /skill:gi"];
+  const inlineSuggestions = await provider.getSuggestions(inline, 0, inline[0].length, { signal });
+  assert.ok(inlineSuggestions?.items.some((item) => item.value === "/skill:git-flow"));
+  assert.equal(provider.shouldTriggerFileCompletion!(["check /skill:gi"], 0, 15), false);
 });

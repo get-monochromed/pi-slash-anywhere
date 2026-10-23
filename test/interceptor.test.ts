@@ -261,3 +261,39 @@ test("inline skill expansion uses the skill directory as its reference base", as
   assert.ok(res.text.includes(`References are relative to ${skillDir}.`));
   assert.ok(res.text.includes("Demo skill content."));
 });
+
+const escapeResolver: SkillResolver = (name: string) =>
+  name === "git-flow"
+    ? {
+        name,
+        filePath: "/path/to/skills/git-flow/SKILL.md",
+        baseDir: "/path/to/skills/git-flow",
+        content: "Git Flow instructions.",
+      }
+    : null;
+
+test("escape: backslash-prefixed \\/skill tokens stay literal and lose the escape", async () => {
+  const result = await transformPromptWithSkills("run \\/skill:git-flow as text", escapeResolver);
+  assert.equal(result, "run /skill:git-flow as text");
+});
+
+test("escape: quoted /skill tokens stay literal in single, double, and backtick quotes", async () => {
+  for (const quoted of [`"/skill:git-flow"`, `'/skill:git-flow'`, "`/skill:git-flow`"]) {
+    const input = `please print ${quoted} literally`;
+    assert.equal(await transformPromptWithSkills(input, escapeResolver), null);
+  }
+});
+
+test("escape: only unescaped, unquoted tokens expand", async () => {
+  const input = `use /skill:git-flow but not "\\/skill:git-flow" or "this /skill:git-flow"`;
+  const result = await transformPromptWithSkills(input, escapeResolver);
+  assert.ok(result !== null);
+  assert.equal((result.match(/<skill name="git-flow"/g) || []).length, 1);
+  assert.ok(result.endsWith(`use /skill:git-flow but not "/skill:git-flow" or "this /skill:git-flow"`));
+});
+
+test("escape: apostrophes do not open a quoted span", async () => {
+  const result = await transformPromptWithSkills("don't skip /skill:git-flow here", escapeResolver);
+  assert.ok(result !== null);
+  assert.ok(result.startsWith('<skill name="git-flow"'));
+});

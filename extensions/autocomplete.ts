@@ -1,6 +1,7 @@
 import type { AutocompleteProvider, AutocompleteSuggestions, AutocompleteItem } from "@earendil-works/pi-tui";
 import { fuzzyFilter } from "@earendil-works/pi-tui";
 import type { SlashCommandInfo } from "@earendil-works/pi-coding-agent";
+import { isInertSlash } from "./escaping.js";
 
 /**
  * Regex matching the trigger condition for inline slash commands:
@@ -33,13 +34,29 @@ export function isLineStartSlashContext(lines: string[], cursorLine: number, cur
   return LINE_START_SLASH_REGEX.test(beforeCursor);
 }
 
+/** Index of the inline slash token at the end of `beforeCursor`, or null. */
+function inlineSlashIndex(beforeCursor: string): number | null {
+  const match = beforeCursor.match(SLASH_TOKEN_BEFORE_CURSOR);
+  if (!match) return null;
+  const token = match[0].trimStart();
+  return beforeCursor.length - token.length;
+}
+
 export function getInlineSlashPrefix(beforeCursor: string): string | null {
   if (LINE_START_SLASH_REGEX.test(beforeCursor)) {
     return null;
   }
   const match = beforeCursor.match(INLINE_SLASH_TRIGGER);
   const token = match?.[1];
-  return token !== undefined && !token.includes("/") ? `/${token}` : null;
+  if (token === undefined || token.includes("/")) {
+    return null;
+  }
+  // Escaped (`\/`) or quoted tokens stay plain text: no inline menu.
+  const slashIndex = inlineSlashIndex(beforeCursor);
+  if (slashIndex !== null && isInertSlash(beforeCursor, slashIndex)) {
+    return null;
+  }
+  return `/${token}`;
 }
 
 /**
@@ -176,7 +193,9 @@ export function createInlineSlashAutocompleteProvider(
       const beforeCursor = currentLine.slice(0, col);
 
       // If text before cursor matches `/(?:^|[ \t])\/[^\s/]*$/`, return false.
-      if (SLASH_TOKEN_BEFORE_CURSOR.test(beforeCursor)) {
+      // Escaped or quoted tokens are plain text, so they fall through to native file completion.
+      const slashIndex = inlineSlashIndex(beforeCursor);
+      if (slashIndex !== null && !isInertSlash(beforeCursor, slashIndex)) {
         return false;
       }
 
